@@ -9,6 +9,7 @@ This is an extension of the flight controller building a dedicated flight contro
 
 
 # References
+## Ground Vehicle
 [https://github.com/mattsroufe/esp32_rc_cars]
 
 [https://michalschwarz.github.io/rc-controller/esp32/quadcopter/f450/asgard32/schema/2019/05/07/esp32-drone-v1.0.0.html]
@@ -23,6 +24,15 @@ This is an extension of the flight controller building a dedicated flight contro
 [https://hackaday.com/2024/10/18/little-rc-car-project-takes-inspiration-from-mario-kart/]
 
 [https://github.com/StuckAtPrototype/Racer]
+
+
+## Controller
+
+[https://github.com/cifertech/ESP32-DIV]
+
+[https://github.com/myildirim6198/ESP32-S3-Remote-Controller]
+
+[https://github.com/kawashimaken/esp32-joystick-remote-control-servos]
 
 
 
