@@ -3,18 +3,17 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.portWin": "COM3",
+  "idf.portWin": "COM5",
   "idf.currentSetup": "C:\\esp\\v6.0\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32s3"
   },
-  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-20.1.1_20250829\\esp-clang\\bin\\clangd.exe",
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\16.0.1-fe4f10a809\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\Users\\emers\\Documents\\School\\UF Classes\\Spring 2026\\Design2\\GroundVitals\\Code\\Car\\xiao_stream\\build"
+    "--compile-commands-dir=c:\\Users\\emers\\Documents\\School\\UF Classes\\Spring 2026\\Design2\\GroundVitals\\Code\\Car\\esp_car\\build"
   ],
   "workbench.colorCustomizations": {},
-  "idf.flashType": "JTAG",
-  "idf.monitorPort": "COM3"
+  "idf.flashType": "JTAG"
 }
