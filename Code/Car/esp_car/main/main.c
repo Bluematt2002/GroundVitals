@@ -126,10 +126,11 @@ void move_right(uint32_t duty)
 // ==============================
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Starting ALL WHEEL TEST");
+    ESP_LOGI(TAG, "Starting BLE controlled vehicle");
 
     setup_pwm();
     ble_receiver_init();
+    static bool wasConnected = false;
     // while (1)
     // {
     //     move_left(700);
@@ -148,13 +149,23 @@ void app_main(void)
     // }
     while (1)
     {
+        bool nowConnected = ble_is_connected();
+
+        // Safety stop on disconnect
+        if (wasConnected && !nowConnected) {
+            ESP_LOGI(TAG, "BLE lost — stopping motors");
+            stop_all();
+        }
+        wasConnected = nowConnected;
+
+        // Process incoming command
         if (ble_cmd_updated) {
             ble_cmd_updated = false;
 
             ESP_LOGI(TAG, "CMD: %s  DUTY: %lu  CONNECTED: %s",
                 ble_cmd_dir,
                 ble_cmd_duty,
-                ble_is_connected() ? "YES" : "NO");
+                nowConnected ? "YES" : "NO");
 
             if (strcmp(ble_cmd_dir, "FWD ") == 0) {
                 move_forward(ble_cmd_duty);
@@ -167,11 +178,6 @@ void app_main(void)
             } else {
                 stop_all();
             }
-        }
-
-        // Safety stop if BLE disconnects
-        if (!ble_is_connected()) {
-            stop_all();
         }
 
         vTaskDelay(pdMS_TO_TICKS(20));
