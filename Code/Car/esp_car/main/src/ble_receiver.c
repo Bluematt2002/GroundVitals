@@ -12,46 +12,40 @@
 
 static const char *TAG = "BLE_CLIENT";
 
-// Must match controller exactly
-#define CONTROLLER_NAME  "ESP32-Controller"
-#define REMOTE_SERVICE_UUID    0x4FAF
-#define REMOTE_CHAR_UUID       0xBEB5
-#define PROFILE_NUM            1
-#define PROFILE_APP_IDX        0
-#define INVALID_HANDLE         0
+#define CONTROLLER_NAME       "ESP32-Controller"
+#define REMOTE_SERVICE_UUID   0x4FAF
+#define REMOTE_CHAR_UUID      0xBEB5
 
 // Exported state
 char     ble_cmd_dir[8]  = "IDLE";
 uint32_t ble_cmd_duty    = 0;
 bool     ble_cmd_updated = false;
 
-static bool              is_connected     = false;
-static bool              get_server       = false;
-static esp_gattc_char_elem_t *char_elem_result = NULL;
+static bool is_connected  = false;
+static bool get_server    = false;
+static esp_gattc_char_elem_t  *char_elem_result  = NULL;
 static esp_gattc_descr_elem_t *descr_elem_result = NULL;
 
-// Profile connection info
 struct gattc_profile_inst {
-    esp_gattc_cb_t       gattc_cb;
-    uint16_t             gattc_if;
-    uint16_t             app_id;
-    uint16_t             conn_id;
-    uint16_t             service_start_handle;
-    uint16_t             service_end_handle;
-    uint16_t             char_handle;
-    esp_bd_addr_t        remote_bda;
+    esp_gattc_cb_t gattc_cb;
+    uint16_t       gattc_if;
+    uint16_t       app_id;
+    uint16_t       conn_id;
+    uint16_t       service_start_handle;
+    uint16_t       service_end_handle;
+    uint16_t       char_handle;
+    esp_bd_addr_t  remote_bda;
 };
 
 static struct gattc_profile_inst gl_profile = {
-    .gattc_cb    = NULL,
-    .gattc_if    = ESP_GATT_IF_NONE,
+    .gattc_cb  = NULL,
+    .gattc_if  = ESP_GATT_IF_NONE,
 };
 
 bool ble_is_connected(void) {
     return is_connected;
 }
 
-// Parse "FWD :766" into dir and duty
 static void parse_command(const uint8_t *data, uint16_t len) {
     char buf[32] = {0};
     if (len >= sizeof(buf)) len = sizeof(buf) - 1;
@@ -64,18 +58,18 @@ static void parse_command(const uint8_t *data, uint16_t len) {
     if (!sep) return;
 
     *sep = '\0';
-    strncpy(ble_cmd_dir, buf,  sizeof(ble_cmd_dir) - 1);
+    strncpy(ble_cmd_dir, buf, sizeof(ble_cmd_dir) - 1);
     ble_cmd_duty    = (uint32_t)atoi(sep + 1);
     ble_cmd_updated = true;
 
     ESP_LOGI(TAG, "DIR: %s  DUTY: %lu", ble_cmd_dir, ble_cmd_duty);
 }
 
-// GAP scan callback — finds controller by name
 static void esp_gap_cb(esp_gap_ble_cb_event_t event,
                        esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
+
     case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
         esp_ble_gap_start_scanning(30);
         break;
@@ -91,19 +85,17 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event,
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         esp_ble_gap_cb_param_t *scan = param;
         if (scan->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
-            uint8_t *adv_name = NULL;
+            uint8_t *adv_name    = NULL;
             uint8_t  adv_name_len = 0;
             adv_name = esp_ble_resolve_adv_data(
                 scan->scan_rst.ble_adv,
                 ESP_BLE_AD_TYPE_NAME_CMPL,
                 &adv_name_len
             );
-
             if (adv_name && adv_name_len > 0) {
                 char name[32] = {0};
                 memcpy(name, adv_name, adv_name_len < 31 ? adv_name_len : 31);
                 ESP_LOGI(TAG, "Found: %s", name);
-
                 if (strcmp(name, CONTROLLER_NAME) == 0) {
                     ESP_LOGI(TAG, "Controller found — connecting");
                     esp_ble_gap_stop_scanning();
@@ -128,26 +120,26 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event,
     }
 }
 
-// GATTC callback — handles connection and notifications
 static void esp_gattc_cb(esp_gattc_cb_event_t event,
                          esp_gatt_if_t gattc_if,
                          esp_ble_gattc_cb_param_t *param)
 {
     switch (event) {
+
     case ESP_GATTC_REG_EVT:
         gl_profile.gattc_if = gattc_if;
         ESP_LOGI(TAG, "GATTC registered");
-
-        // Start scanning
-        esp_ble_scan_params_t scan_params = {
-            .scan_type          = BLE_SCAN_TYPE_ACTIVE,
-            .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
-            .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
-            .scan_interval      = 0x50,
-            .scan_window        = 0x30,
-            .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE
-        };
-        esp_ble_gap_set_scan_params(&scan_params);
+        {
+            esp_ble_scan_params_t scan_params = {
+                .scan_type          = BLE_SCAN_TYPE_ACTIVE,
+                .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+                .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+                .scan_interval      = 0x50,
+                .scan_window        = 0x30,
+                .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE
+            };
+            esp_ble_gap_set_scan_params(&scan_params);
+        }
         break;
 
     case ESP_GATTC_OPEN_EVT:
@@ -167,22 +159,23 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
         is_connected = false;
         get_server   = false;
         ESP_LOGI(TAG, "Disconnected — rescanning");
-        // Restart scan
-        esp_ble_scan_params_t scan_params2 = {
-            .scan_type          = BLE_SCAN_TYPE_ACTIVE,
-            .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
-            .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
-            .scan_interval      = 0x50,
-            .scan_window        = 0x30,
-            .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE
-        };
-        esp_ble_gap_set_scan_params(&scan_params2);
+        {
+            esp_ble_scan_params_t scan_params2 = {
+                .scan_type          = BLE_SCAN_TYPE_ACTIVE,
+                .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+                .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+                .scan_interval      = 0x50,
+                .scan_window        = 0x30,
+                .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE
+            };
+            esp_ble_gap_set_scan_params(&scan_params2);
+        }
         break;
 
     case ESP_GATTC_SEARCH_RES_EVT: {
-        esp_gatt_srvc_id_t *srvc = &param->search_res.srvc_id;
-        if (srvc->id.uuid.len == ESP_UUID_LEN_16 &&
-            srvc->id.uuid.uuid.uuid16 == REMOTE_SERVICE_UUID) {
+        esp_gatt_id_t *srvc = &param->search_res.srvc_id;
+        if (srvc->uuid.len == ESP_UUID_LEN_16 &&
+            srvc->uuid.uuid.uuid16 == REMOTE_SERVICE_UUID) {
             ESP_LOGI(TAG, "Service found");
             gl_profile.service_start_handle = param->search_res.start_handle;
             gl_profile.service_end_handle   = param->search_res.end_handle;
@@ -200,38 +193,38 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
             ESP_LOGE(TAG, "Service not found");
             break;
         }
+        {
+            uint16_t count = 1;
+            esp_bt_uuid_t char_uuid = {
+                .len         = ESP_UUID_LEN_16,
+                .uuid.uuid16 = REMOTE_CHAR_UUID
+            };
+            char_elem_result = malloc(sizeof(esp_gattc_char_elem_t));
+            if (!char_elem_result) break;
 
-        // Find characteristic
-        uint16_t count = 1;
-        esp_bt_uuid_t char_uuid = {
-            .len         = ESP_UUID_LEN_16,
-            .uuid.uuid16 = REMOTE_CHAR_UUID
-        };
-        char_elem_result = malloc(sizeof(esp_gattc_char_elem_t));
-        if (!char_elem_result) break;
-
-        esp_ble_gattc_get_char_by_uuid(
-            gattc_if,
-            param->search_cmpl.conn_id,
-            gl_profile.service_start_handle,
-            gl_profile.service_end_handle,
-            char_uuid,
-            char_elem_result,
-            &count
-        );
-
-        if (count > 0 &&
-            (char_elem_result[0].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY)) {
-            gl_profile.char_handle = char_elem_result[0].char_handle;
-            esp_ble_gattc_register_for_notify(
+            esp_ble_gattc_get_char_by_uuid(
                 gattc_if,
-                gl_profile.remote_bda,
-                char_elem_result[0].char_handle
+                param->search_cmpl.conn_id,
+                gl_profile.service_start_handle,
+                gl_profile.service_end_handle,
+                char_uuid,
+                char_elem_result,
+                &count
             );
-            ESP_LOGI(TAG, "Subscribed to notifications");
+
+            if (count > 0 &&
+                (char_elem_result[0].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY)) {
+                gl_profile.char_handle = char_elem_result[0].char_handle;
+                esp_ble_gattc_register_for_notify(
+                    gattc_if,
+                    gl_profile.remote_bda,
+                    char_elem_result[0].char_handle
+                );
+                ESP_LOGI(TAG, "Registered for notifications");
+            }
+            free(char_elem_result);
+            char_elem_result = NULL;
         }
-        free(char_elem_result);
-        char_elem_result = NULL;
         break;
 
     case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
@@ -239,9 +232,7 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
             ESP_LOGE(TAG, "Notify register failed");
             break;
         }
-
-        // Enable notifications by writing to CCCD
-        uint16_t count2 = 1;
+        uint16_t count2    = 1;
         uint16_t notify_en = 1;
         esp_bt_uuid_t descr_uuid = {
             .len         = ESP_UUID_LEN_16,
@@ -252,7 +243,7 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
 
         esp_ble_gattc_get_descr_by_char_handle(
             gattc_if,
-            param->reg_for_notify.conn_id,
+            gl_profile.conn_id,
             gl_profile.char_handle,
             descr_uuid,
             descr_elem_result,
@@ -262,7 +253,7 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
         if (count2 > 0) {
             esp_ble_gattc_write_char_descr(
                 gattc_if,
-                param->reg_for_notify.conn_id,
+                gl_profile.conn_id,
                 descr_elem_result[0].handle,
                 sizeof(notify_en),
                 (uint8_t *)&notify_en,
