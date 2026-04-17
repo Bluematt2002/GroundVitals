@@ -2,31 +2,50 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
-#include "esp_gap_ble_api.h"
-#include "esp_gatts_api.h"
 #include "esp_bt_main.h"
+#include "esp_gap_ble_api.h"
+#include "esp_gattc_api.h"
+#include "esp_gatt_defs.h"
 #include "esp_gatt_common_api.h"
 #include <string.h>
 #include <stdlib.h>
 
-static const char *TAG = "BLE_RECEIVER";
+static const char *TAG = "BLE_CLIENT";
 
-#define DEVICE_NAME      "ESP32-Vehicle"
-#define ESP_APP_ID       0x55
-#define GATTS_NUM_HANDLE 4
+// Must match controller exactly
+#define CONTROLLER_NAME  "ESP32-Controller"
+#define REMOTE_SERVICE_UUID    0x4FAF
+#define REMOTE_CHAR_UUID       0xBEB5
+#define PROFILE_NUM            1
+#define PROFILE_APP_IDX        0
+#define INVALID_HANDLE         0
 
-// Must match controller UUIDs exactly
-#define SERVICE_UUID  0x4FAF
-#define CHAR_UUID     0xBEB5
-
-// Exported command state
+// Exported state
 char     ble_cmd_dir[8]  = "IDLE";
 uint32_t ble_cmd_duty    = 0;
 bool     ble_cmd_updated = false;
 
-static bool     is_connected = false;
-static uint16_t service_handle;
-static uint16_t char_handle;
+static bool              is_connected     = false;
+static bool              get_server       = false;
+static esp_gattc_char_elem_t *char_elem_result = NULL;
+static esp_gattc_descr_elem_t *descr_elem_result = NULL;
+
+// Profile connection info
+struct gattc_profile_inst {
+    esp_gattc_cb_t       gattc_cb;
+    uint16_t             gattc_if;
+    uint16_t             app_id;
+    uint16_t             conn_id;
+    uint16_t             service_start_handle;
+    uint16_t             service_end_handle;
+    uint16_t             char_handle;
+    esp_bd_addr_t        remote_bda;
+};
+
+static struct gattc_profile_inst gl_profile = {
+    .gattc_cb    = NULL,
+    .gattc_if    = ESP_GATT_IF_NONE,
+};
 
 bool ble_is_connected(void) {
     return is_connected;
@@ -45,101 +64,63 @@ static void parse_command(const uint8_t *data, uint16_t len) {
     if (!sep) return;
 
     *sep = '\0';
-    strncpy(ble_cmd_dir, buf,   sizeof(ble_cmd_dir) - 1);
+    strncpy(ble_cmd_dir, buf,  sizeof(ble_cmd_dir) - 1);
     ble_cmd_duty    = (uint32_t)atoi(sep + 1);
     ble_cmd_updated = true;
 
     ESP_LOGI(TAG, "DIR: %s  DUTY: %lu", ble_cmd_dir, ble_cmd_duty);
 }
 
-// BLE advertising parameters
-static esp_ble_adv_params_t adv_params = {
-    .adv_int_min       = 0x20,
-    .adv_int_max       = 0x40,
-    .adv_type          = ADV_TYPE_IND,
-    .own_addr_type     = BLE_ADDR_TYPE_PUBLIC,
-    .channel_map       = ADV_CHNL_ALL,
-    .adv_filter_policy = ADV_FILTER_ALLOW_SCAN_ANY_CON_ANY,
-};
-
-static void gatts_event_handler(
-    esp_gatts_cb_event_t       event,
-    esp_gatt_if_t              gatts_if,
-    esp_ble_gatts_cb_param_t  *param)
+// GAP scan callback — finds controller by name
+static void esp_gap_cb(esp_gap_ble_cb_event_t event,
+                       esp_ble_gap_cb_param_t *param)
 {
     switch (event) {
-
-    case ESP_GATTS_REG_EVT:
-        ESP_LOGI(TAG, "GATTS registered");
-        esp_ble_gap_set_device_name(DEVICE_NAME);
-        esp_ble_gap_start_advertising(&adv_params);
-
-        esp_gatt_srvc_id_t service_id = {
-            .is_primary       = true,
-            .id.inst_id       = 0,
-            .id.uuid.len      = ESP_UUID_LEN_16,
-            .id.uuid.uuid.uuid16 = SERVICE_UUID,
-        };
-        esp_ble_gatts_create_service(gatts_if, &service_id, GATTS_NUM_HANDLE);
+    case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
+        esp_ble_gap_start_scanning(30);
         break;
 
-    case ESP_GATTS_CREATE_EVT:
-        service_handle = param->create.service_handle;
-        esp_ble_gatts_start_service(service_handle);
-        ESP_LOGI(TAG, "Service created and started");
-
-        esp_bt_uuid_t char_uuid = {
-            .len            = ESP_UUID_LEN_16,
-            .uuid.uuid16    = CHAR_UUID,
-        };
-        esp_ble_gatts_add_char(
-            service_handle,
-            &char_uuid,
-            ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
-            ESP_GATT_CHAR_PROP_BIT_READ  |
-            ESP_GATT_CHAR_PROP_BIT_WRITE |
-            ESP_GATT_CHAR_PROP_BIT_NOTIFY,
-            NULL, NULL
-        );
-        break;
-
-    case ESP_GATTS_ADD_CHAR_EVT:
-        char_handle = param->add_char.attr_handle;
-        ESP_LOGI(TAG, "Characteristic added, handle: %d", char_handle);
-        break;
-
-    case ESP_GATTS_CONNECT_EVT:
-        is_connected = true;
-        ESP_LOGI(TAG, "Controller connected");
-        // Request faster connection interval for lower latency
-        esp_ble_conn_update_params_t conn_params = {
-            .latency  = 0,
-            .max_int  = 0x10,
-            .min_int  = 0x06,
-            .timeout  = 400,
-        };
-        memcpy(conn_params.bda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
-        esp_ble_gap_update_conn_params(&conn_params);
-        break;
-
-    case ESP_GATTS_DISCONNECT_EVT:
-        is_connected = false;
-        ESP_LOGI(TAG, "Controller disconnected — restarting advertising");
-        esp_ble_gap_start_advertising(&adv_params);
-        break;
-
-    case ESP_GATTS_WRITE_EVT:
-        parse_command(param->write.value, param->write.len);
-
-        // Send write response
-        if (!param->write.is_prep) {
-            esp_ble_gatts_send_response(
-                gatts_if,
-                param->write.conn_id,
-                param->write.trans_id,
-                ESP_GATT_OK, NULL
-            );
+    case ESP_GAP_BLE_SCAN_START_COMPLETE_EVT:
+        if (param->scan_start_cmpl.status != ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGE(TAG, "Scan start failed");
+        } else {
+            ESP_LOGI(TAG, "Scanning for %s...", CONTROLLER_NAME);
         }
+        break;
+
+    case ESP_GAP_BLE_SCAN_RESULT_EVT: {
+        esp_ble_gap_cb_param_t *scan = param;
+        if (scan->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
+            uint8_t *adv_name = NULL;
+            uint8_t  adv_name_len = 0;
+            adv_name = esp_ble_resolve_adv_data(
+                scan->scan_rst.ble_adv,
+                ESP_BLE_AD_TYPE_NAME_CMPL,
+                &adv_name_len
+            );
+
+            if (adv_name && adv_name_len > 0) {
+                char name[32] = {0};
+                memcpy(name, adv_name, adv_name_len < 31 ? adv_name_len : 31);
+                ESP_LOGI(TAG, "Found: %s", name);
+
+                if (strcmp(name, CONTROLLER_NAME) == 0) {
+                    ESP_LOGI(TAG, "Controller found — connecting");
+                    esp_ble_gap_stop_scanning();
+                    esp_ble_gattc_open(
+                        gl_profile.gattc_if,
+                        scan->scan_rst.bda,
+                        scan->scan_rst.ble_addr_type,
+                        true
+                    );
+                }
+            }
+        }
+        break;
+    }
+
+    case ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT:
+        ESP_LOGI(TAG, "Scan stopped");
         break;
 
     default:
@@ -147,28 +128,55 @@ static void gatts_event_handler(
     }
 }
 
-void ble_receiver_init(void) {
-    // Init NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
-        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ESP_ERROR_CHECK(nvs_flash_init());
-    }
+// GATTC callback — handles connection and notifications
+static void esp_gattc_cb(esp_gattc_cb_event_t event,
+                         esp_gatt_if_t gattc_if,
+                         esp_ble_gattc_cb_param_t *param)
+{
+    switch (event) {
+    case ESP_GATTC_REG_EVT:
+        gl_profile.gattc_if = gattc_if;
+        ESP_LOGI(TAG, "GATTC registered");
 
-    // Init BT controller
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
-    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
+        // Start scanning
+        esp_ble_scan_params_t scan_params = {
+            .scan_type          = BLE_SCAN_TYPE_ACTIVE,
+            .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+            .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+            .scan_interval      = 0x50,
+            .scan_window        = 0x30,
+            .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE
+        };
+        esp_ble_gap_set_scan_params(&scan_params);
+        break;
 
-    // Init Bluedroid
-    ESP_ERROR_CHECK(esp_bluedroid_init());
-    ESP_ERROR_CHECK(esp_bluedroid_enable());
+    case ESP_GATTC_OPEN_EVT:
+        if (param->open.status != ESP_GATT_OK) {
+            ESP_LOGE(TAG, "Open failed, status: %d", param->open.status);
+            break;
+        }
+        ESP_LOGI(TAG, "Connected to controller");
+        gl_profile.conn_id = param->open.conn_id;
+        memcpy(gl_profile.remote_bda, param->open.remote_bda,
+               sizeof(esp_bd_addr_t));
+        is_connected = true;
+        esp_ble_gattc_search_service(gattc_if, param->open.conn_id, NULL);
+        break;
 
-    // Register GATTS callback
-    ESP_ERROR_CHECK(esp_ble_gatts_register_callback(gatts_event_handler));
-    ESP_ERROR_CHECK(esp_ble_gatts_app_register(ESP_APP_ID));
-    ESP_ERROR_CHECK(esp_ble_gatt_set_local_mtu(500));
+    case ESP_GATTC_DISCONNECT_EVT:
+        is_connected = false;
+        get_server   = false;
+        ESP_LOGI(TAG, "Disconnected — rescanning");
+        // Restart scan
+        esp_ble_scan_params_t scan_params2 = {
+            .scan_type          = BLE_SCAN_TYPE_ACTIVE,
+            .own_addr_type      = BLE_ADDR_TYPE_PUBLIC,
+            .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+            .scan_interval      = 0x50,
+            .scan_window        = 0x30,
+            .scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE
+        };
+        esp_ble_gap_set_scan_params(&scan_params2);
+        break;
 
-    ESP_LOGI(TAG, "BLE receiver ready — advertising as '%s'", DEVICE_NAME);
-}
+    case ESP_GATTC_SEARCH
