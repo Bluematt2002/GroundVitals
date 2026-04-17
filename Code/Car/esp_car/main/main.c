@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 #include "driver/ledc.h"
 #include "esp_log.h"
+#include "ble_receiver.h"
 
 #include "car_pins.h"
 
@@ -128,22 +129,52 @@ void app_main(void)
     ESP_LOGI(TAG, "Starting ALL WHEEL TEST");
 
     setup_pwm();
+    ble_receiver_init();
+    // while (1)
+    // {
+    //     move_left(700);
 
+    //     vTaskDelay(pdMS_TO_TICKS(4000));
+
+    //     stop_all();
+    //     vTaskDelay(pdMS_TO_TICKS(2000));
+
+    //     move_right(700);
+
+    //     vTaskDelay(pdMS_TO_TICKS(4000));
+
+    //     stop_all();
+    //     vTaskDelay(pdMS_TO_TICKS(3000));
+    // }
     while (1)
     {
-        move_left(700);
+        if (ble_cmd_updated) {
+            ble_cmd_updated = false;
 
-        vTaskDelay(pdMS_TO_TICKS(4000));
+            ESP_LOGI(TAG, "CMD: %s  DUTY: %lu  CONNECTED: %s",
+                ble_cmd_dir,
+                ble_cmd_duty,
+                ble_is_connected() ? "YES" : "NO");
 
-        stop_all();
-        vTaskDelay(pdMS_TO_TICKS(2000));
+            if (strcmp(ble_cmd_dir, "FWD ") == 0) {
+                move_forward(ble_cmd_duty);
+            } else if (strcmp(ble_cmd_dir, "BACK") == 0) {
+                move_reverse(ble_cmd_duty);
+            } else if (strcmp(ble_cmd_dir, "LEFT") == 0) {
+                move_left(ble_cmd_duty);
+            } else if (strcmp(ble_cmd_dir, "RGHT") == 0) {
+                move_right(ble_cmd_duty);
+            } else {
+                stop_all();
+            }
+        }
 
-        move_right(700);
+        // Safety stop if BLE disconnects
+        if (!ble_is_connected()) {
+            stop_all();
+        }
 
-        vTaskDelay(pdMS_TO_TICKS(4000));
-
-        stop_all();
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 
