@@ -179,4 +179,130 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
         esp_ble_gap_set_scan_params(&scan_params2);
         break;
 
-    case ESP_GATTC_SEARCH
+    case ESP_GATTC_SEARCH_RES_EVT: {
+        esp_gatt_srvc_id_t *srvc = &param->search_res.srvc_id;
+        if (srvc->id.uuid.len == ESP_UUID_LEN_16 &&
+            srvc->id.uuid.uuid.uuid16 == REMOTE_SERVICE_UUID) {
+            ESP_LOGI(TAG, "Service found");
+            gl_profile.service_start_handle = param->search_res.start_handle;
+            gl_profile.service_end_handle   = param->search_res.end_handle;
+            get_server = true;
+        }
+        break;
+    }
+
+    case ESP_GATTC_SEARCH_CMPL_EVT:
+        if (param->search_cmpl.status != ESP_GATT_OK) {
+            ESP_LOGE(TAG, "Service search failed");
+            break;
+        }
+        if (!get_server) {
+            ESP_LOGE(TAG, "Service not found");
+            break;
+        }
+
+        // Find characteristic
+        uint16_t count = 1;
+        esp_bt_uuid_t char_uuid = {
+            .len         = ESP_UUID_LEN_16,
+            .uuid.uuid16 = REMOTE_CHAR_UUID
+        };
+        char_elem_result = malloc(sizeof(esp_gattc_char_elem_t));
+        if (!char_elem_result) break;
+
+        esp_ble_gattc_get_char_by_uuid(
+            gattc_if,
+            param->search_cmpl.conn_id,
+            gl_profile.service_start_handle,
+            gl_profile.service_end_handle,
+            char_uuid,
+            char_elem_result,
+            &count
+        );
+
+        if (count > 0 &&
+            (char_elem_result[0].properties & ESP_GATT_CHAR_PROP_BIT_NOTIFY)) {
+            gl_profile.char_handle = char_elem_result[0].char_handle;
+            esp_ble_gattc_register_for_notify(
+                gattc_if,
+                gl_profile.remote_bda,
+                char_elem_result[0].char_handle
+            );
+            ESP_LOGI(TAG, "Subscribed to notifications");
+        }
+        free(char_elem_result);
+        char_elem_result = NULL;
+        break;
+
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
+        if (param->reg_for_notify.status != ESP_GATT_OK) {
+            ESP_LOGE(TAG, "Notify register failed");
+            break;
+        }
+
+        // Enable notifications by writing to CCCD
+        uint16_t count2 = 1;
+        uint16_t notify_en = 1;
+        esp_bt_uuid_t descr_uuid = {
+            .len         = ESP_UUID_LEN_16,
+            .uuid.uuid16 = ESP_GATT_UUID_CHAR_CLIENT_CONFIG
+        };
+        descr_elem_result = malloc(sizeof(esp_gattc_descr_elem_t));
+        if (!descr_elem_result) break;
+
+        esp_ble_gattc_get_descr_by_char_handle(
+            gattc_if,
+            param->reg_for_notify.conn_id,
+            gl_profile.char_handle,
+            descr_uuid,
+            descr_elem_result,
+            &count2
+        );
+
+        if (count2 > 0) {
+            esp_ble_gattc_write_char_descr(
+                gattc_if,
+                param->reg_for_notify.conn_id,
+                descr_elem_result[0].handle,
+                sizeof(notify_en),
+                (uint8_t *)&notify_en,
+                ESP_GATT_WRITE_TYPE_RSP,
+                ESP_GATT_AUTH_REQ_NONE
+            );
+            ESP_LOGI(TAG, "CCCD written — notifications enabled");
+        }
+        free(descr_elem_result);
+        descr_elem_result = NULL;
+        break;
+    }
+
+    case ESP_GATTC_NOTIFY_EVT:
+        parse_command(param->notify.value, param->notify.value_len);
+        break;
+
+    default:
+        break;
+    }
+}
+
+void ble_receiver_init(void) {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
+        ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    }
+
+    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
+    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
+    ESP_ERROR_CHECK(esp_bluedroid_init());
+    ESP_ERROR_CHECK(esp_bluedroid_enable());
+
+    ESP_ERROR_CHECK(esp_ble_gap_register_callback(esp_gap_cb));
+    ESP_ERROR_CHECK(esp_ble_gattc_register_callback(esp_gattc_cb));
+    ESP_ERROR_CHECK(esp_ble_gattc_app_register(0));
+    ESP_ERROR_CHECK(esp_ble_gatt_set_local_mtu(500));
+
+    ESP_LOGI(TAG, "BLE client ready — scanning for controller");
+}
