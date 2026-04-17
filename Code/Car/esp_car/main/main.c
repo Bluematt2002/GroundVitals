@@ -103,22 +103,22 @@ void move_reverse(uint32_t duty)
     set_motor(6, 7, duty, true); // BR
 }
 
-void move_left(uint32_t duty)
+void turn_left(uint32_t duty)
 {
     ESP_LOGI(TAG, "SHIFT LEFT");
-    set_motor(0, 1, duty, true);  // FL forward
-    set_motor(2, 3, duty, true);  // FR forward
-    set_motor(4, 5, duty, false); // BL reverse
-    set_motor(6, 7, duty, false); // BR reverse
+    set_motor(0, 1, duty, true);  // FL
+    set_motor(2, 3, duty, false);  // FR
+    set_motor(4, 5, duty, false); // BL
+    set_motor(6, 7, duty, true); // BR
 }
 
-void move_right(uint32_t duty)
+void turn_right(uint32_t duty)
 {
     ESP_LOGI(TAG, "SHIFT RIGHT");
-    set_motor(0, 1, duty, false); // FL reverse
-    set_motor(2, 3, duty, false); // FR reverse
-    set_motor(4, 5, duty, true);  // BL forward
-    set_motor(6, 7, duty, true);  // BR forward
+    set_motor(0, 1, duty, true); // FL
+    set_motor(2, 3, duty, false); // FR
+    set_motor(4, 5, duty, false);  // BL
+    set_motor(6, 7, duty, true);  // BR
 }
 
 // ==============================
@@ -133,14 +133,14 @@ void app_main(void)
     static bool wasConnected = false;
     // while (1)
     // {
-    //     move_left(700);
+    //     turn_left(700);
 
     //     vTaskDelay(pdMS_TO_TICKS(4000));
 
     //     stop_all();
     //     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    //     move_right(700);
+    //     turn_right(700);
 
     //     vTaskDelay(pdMS_TO_TICKS(4000));
 
@@ -172,9 +172,9 @@ void app_main(void)
             } else if (strcmp(ble_cmd_dir, "BACK") == 0) {
                 move_reverse(ble_cmd_duty);
             } else if (strcmp(ble_cmd_dir, "LEFT") == 0) {
-                move_left(ble_cmd_duty);
+                turn_left(ble_cmd_duty);
             } else if (strcmp(ble_cmd_dir, "RGHT") == 0) {
-                move_right(ble_cmd_duty);
+                turn_right(ble_cmd_duty);
             } else {
                 stop_all();
             }
@@ -396,7 +396,7 @@ void move_reverse(uint32_t duty)
     }
 }
 
-void move_left(uint32_t duty)
+void turn_left(uint32_t duty)
 {
     ESP_LOGI(TAG, "LEFT");
 
@@ -410,7 +410,7 @@ void move_left(uint32_t duty)
     }
 }
 
-void move_right(uint32_t duty)
+void turn_right(uint32_t duty)
 {
     ESP_LOGI(TAG, "RIGHT");
 
@@ -442,7 +442,7 @@ void app_main(void)
         stop_all();
         vTaskDelay(pdMS_TO_TICKS(2000));
 
-        move_left(BASE_DUTY);
+        turn_left(BASE_DUTY);
         vTaskDelay(pdMS_TO_TICKS(5000));
 
         stop_all();
