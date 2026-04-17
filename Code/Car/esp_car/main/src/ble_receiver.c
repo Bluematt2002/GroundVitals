@@ -12,9 +12,19 @@
 
 static const char *TAG = "BLE_CLIENT";
 
-#define CONTROLLER_NAME       "ESP32-Controller"
-#define REMOTE_SERVICE_UUID   0x4FAF
-#define REMOTE_CHAR_UUID      0xBEB5
+#define CONTROLLER_NAME  "ESP32-Controller"
+
+// Service UUID: 4fafc201-1fb5-459e-8fcc-c5c9c331914b (little-endian)
+static const uint8_t uuid128[16] = {
+    0x4b, 0x91, 0x31, 0xc3, 0xc9, 0xc5, 0xcc, 0x8f,
+    0x9e, 0x45, 0xb5, 0x1f, 0x01, 0xc2, 0xaf, 0x4f
+};
+
+// Characteristic UUID: beb5483e-36e1-4688-b7f5-ea07361b26a8 (little-endian)
+static const uint8_t char_uuid128[16] = {
+    0xa8, 0x26, 0x1b, 0x36, 0x07, 0xea, 0xf5, 0xb7,
+    0x88, 0x46, 0xe1, 0x36, 0x3e, 0x48, 0xb5, 0xbe
+};
 
 // Exported state
 char     ble_cmd_dir[8]  = "IDLE";
@@ -38,8 +48,8 @@ struct gattc_profile_inst {
 };
 
 static struct gattc_profile_inst gl_profile = {
-    .gattc_cb  = NULL,
-    .gattc_if  = ESP_GATT_IF_NONE,
+    .gattc_cb = NULL,
+    .gattc_if = ESP_GATT_IF_NONE,
 };
 
 bool ble_is_connected(void) {
@@ -85,7 +95,7 @@ static void esp_gap_cb(esp_gap_ble_cb_event_t event,
     case ESP_GAP_BLE_SCAN_RESULT_EVT: {
         esp_ble_gap_cb_param_t *scan = param;
         if (scan->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
-            uint8_t *adv_name    = NULL;
+            uint8_t *adv_name     = NULL;
             uint8_t  adv_name_len = 0;
             adv_name = esp_ble_resolve_adv_data(
                 scan->scan_rst.ble_adv,
@@ -173,9 +183,9 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
         break;
 
     case ESP_GATTC_SEARCH_RES_EVT: {
-        esp_gatt_id_t *srvc = &param->search_res.srvc_id;
-        if (srvc->uuid.len == ESP_UUID_LEN_16 &&
-            srvc->uuid.uuid.uuid16 == REMOTE_SERVICE_UUID) {
+        if (param->search_res.srvc_id.uuid.len == ESP_UUID_LEN_128 &&
+            memcmp(param->search_res.srvc_id.uuid.uuid.uuid128,
+                   uuid128, 16) == 0) {
             ESP_LOGI(TAG, "Service found");
             gl_profile.service_start_handle = param->search_res.start_handle;
             gl_profile.service_end_handle   = param->search_res.end_handle;
@@ -195,10 +205,9 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
         }
         {
             uint16_t count = 1;
-            esp_bt_uuid_t char_uuid = {
-                .len         = ESP_UUID_LEN_16,
-                .uuid.uuid16 = REMOTE_CHAR_UUID
-            };
+            esp_bt_uuid_t char_uuid = {.len = ESP_UUID_LEN_128};
+            memcpy(char_uuid.uuid.uuid128, char_uuid128, 16);
+
             char_elem_result = malloc(sizeof(esp_gattc_char_elem_t));
             if (!char_elem_result) break;
 
@@ -221,6 +230,8 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
                     char_elem_result[0].char_handle
                 );
                 ESP_LOGI(TAG, "Registered for notifications");
+            } else {
+                ESP_LOGE(TAG, "Characteristic not found or no notify property");
             }
             free(char_elem_result);
             char_elem_result = NULL;
@@ -261,6 +272,8 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
                 ESP_GATT_AUTH_REQ_NONE
             );
             ESP_LOGI(TAG, "CCCD written — notifications enabled");
+        } else {
+            ESP_LOGE(TAG, "CCCD descriptor not found");
         }
         free(descr_elem_result);
         descr_elem_result = NULL;
