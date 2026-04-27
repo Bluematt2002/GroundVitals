@@ -289,6 +289,28 @@ static void esp_gattc_cb(esp_gattc_cb_event_t event,
     }
 }
 
+// void ble_receiver_init(void) {
+//     esp_err_t ret = nvs_flash_init();
+//     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
+//         ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+//         ESP_ERROR_CHECK(nvs_flash_erase());
+//         ESP_ERROR_CHECK(nvs_flash_init());
+//     }
+
+//     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+//     ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
+//     ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
+//     ESP_ERROR_CHECK(esp_bluedroid_init());
+//     ESP_ERROR_CHECK(esp_bluedroid_enable());
+
+//     ESP_ERROR_CHECK(esp_ble_gap_register_callback(esp_gap_cb));
+//     ESP_ERROR_CHECK(esp_ble_gattc_register_callback(esp_gattc_cb));
+//     ESP_ERROR_CHECK(esp_ble_gattc_app_register(0));
+//     ESP_ERROR_CHECK(esp_ble_gatt_set_local_mtu(500));
+
+//     ESP_LOGI(TAG, "BLE client ready — scanning for controller");
+// }
+
 void ble_receiver_init(void) {
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES ||
@@ -299,14 +321,31 @@ void ble_receiver_init(void) {
 
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_bt_controller_init(&bt_cfg));
-    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE));
+    ESP_ERROR_CHECK(esp_bt_controller_enable(ESP_BT_MODE_BLE)); 
     ESP_ERROR_CHECK(esp_bluedroid_init());
     ESP_ERROR_CHECK(esp_bluedroid_enable());
 
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(esp_gap_cb));
     ESP_ERROR_CHECK(esp_ble_gattc_register_callback(esp_gattc_cb));
     ESP_ERROR_CHECK(esp_ble_gattc_app_register(0));
-    ESP_ERROR_CHECK(esp_ble_gatt_set_local_mtu(500));
+    ESP_ERROR_CHECK(esp_ble_gatt_set_local_mtu(185)); // Changed
 
-    ESP_LOGI(TAG, "BLE client ready — scanning for controller");
+    // Maximize transmit power
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);
+    esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_SCAN, ESP_PWR_LVL_P9);
+
+    // Scan parameters (continuous scan for better sensitivity)
+    esp_ble_scan_params_t scan_params = {
+        .scan_type = BLE_SCAN_TYPE_ACTIVE,
+        .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
+        .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
+        .scan_interval = 0x100,  // longer interval
+        .scan_window = 0x100,    // = interval → continuous scan
+        .scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE
+    };
+
+    ESP_ERROR_CHECK(esp_ble_gap_set_scan_params(&scan_params));
+
+    ESP_LOGI(TAG, "BLE client ready — optimized for long range");
 }
